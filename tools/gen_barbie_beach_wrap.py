@@ -2,8 +2,7 @@
 """Generate the Miami Barbie beach wrap for the Model Y (2025+) Premium template.
 
 A sunset beach scene wrapped along both flanks: palm trees over sand and ocean
-under a Miami sunset, with a sunbather reclining across the left side of the
-car and the Barbie wordmark across the right.
+under a Miami sunset, with the Barbie wordmark across the right flank.
 
 Each flank is painted as one continuous scene rather than panel by panel, so
 the horizon and the palms run unbroken from the front fender to the rear
@@ -98,13 +97,6 @@ def vertical_ramp(draw, x0, x1, y0, y1, stops):
         draw.line([(x0, y), (x1, y)], fill=ramp(stops, (y - y0) / max(1, y1 - y0)))
 
 
-def capsule(d, p0, p1, w, color):
-    """A thick line with round ends -- the building block for the figure."""
-    d.line([p0, p1], fill=color, width=int(w))
-    for x, y in (p0, p1):
-        d.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill=color)
-
-
 def bezier(p0, p1, p2, n=44):
     return [((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0],
              (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1])
@@ -141,35 +133,6 @@ def palm(d, x, ground, height, lean, color):
         r = height * 0.028
         d.ellipse([cx + dx * height - r, cy + dy * height - r,
                    cx + dx * height + r, cy + dy * height + r], fill=color)
-
-
-def sunbather(d, cx, cy, k):
-    """A reclining figure in flat silhouette, hair and swimsuit picked out in
-    color. The design is laid out about 340 wide by 130 tall, then scaled by k
-    and centred on cx, cy. Head toward the nose of the car."""
-    def p(a, b):
-        return (cx + (a - 170) * k, cy + (b - 64) * k)
-
-    d.rounded_rectangle([p(-34, 104), p(334, 128)], radius=12 * k, fill=WHITE)
-    for i in range(8):
-        d.rectangle([p(-24 + i * 48, 104), p(-2 + i * 48, 128)], fill=HOT)
-
-    capsule(d, p(168, 100), p(300, 110), 30 * k, SHADOW)      # far leg
-    capsule(d, p(70, 56), p(166, 96), 46 * k, SHADOW)         # torso
-    capsule(d, p(166, 96), p(236, 46), 34 * k, SHADOW)        # thigh
-    capsule(d, p(236, 46), p(288, 104), 24 * k, SHADOW)       # calf
-    d.ellipse([p(280, 94), p(306, 116)], fill=SHADOW)         # foot
-    capsule(d, p(74, 62), p(40, 100), 18 * k, SHADOW)         # propping arm
-    capsule(d, p(58, 50), p(74, 60), 17 * k, SHADOW)          # neck
-
-    d.ellipse([p(8, 42), p(68, 100)], fill=GOLD)              # hair behind
-    d.ellipse([p(28, 20), p(72, 64)], fill=SHADOW)            # head
-    d.ellipse([p(10, 28), p(44, 72)], fill=GOLD)              # hair in front
-    d.ellipse([p(-4, 4), p(94, 40)], fill=HOT)                # sun hat brim
-    d.ellipse([p(26, 0), p(70, 30)], fill=PINK)               # hat crown
-
-    d.polygon([p(96, 52), p(128, 46), p(122, 80), p(92, 78)], fill=PINK)
-    d.polygon([p(150, 78), p(188, 70), p(192, 102), p(152, 104)], fill=PINK)
 
 
 def sliced_sun(w, h, cx, cy, r, cut_below=None):
@@ -217,12 +180,16 @@ def flank_scene(length, height, side, wordmark):
         d.rounded_rectangle([sx - half, y, sx + half, y + 2.5 * SS],
                             radius=2 * SS, fill=(255, 240, 210))
 
-    for s, hgt, lean in ((0.135, 0.58, -0.19), (0.70, 0.52, 0.16), (0.92, 0.38, -0.11)):
-        palm(d, along(side, s, L), H * 0.92, H * hgt, lean * H, SHADOW)
+    # The wordmark side keeps its middle clear; the other flank carries a full
+    # grove so it reads as a composed scene rather than empty beach.
+    grove = ((0.135, 0.58, -0.19), (0.36, 0.66, 0.14), (0.55, 0.50, -0.16),
+             (0.72, 0.62, 0.17), (0.90, 0.40, -0.11))
+    if side == "right":
+        grove = ((0.135, 0.58, -0.19), (0.72, 0.52, 0.16), (0.90, 0.38, -0.11))
+    for s_, hgt, lean in grove:
+        palm(d, along(side, s_, L), H * 0.92, H * hgt, lean * H, SHADOW)
 
-    if side == "left":
-        sunbather(d, along(side, 0.50, L), H * 0.66, H * 0.0031)
-    else:
+    if side == "right":
         target_h = int(H * 0.52)
         mark = wordmark.resize((int(target_h * wordmark.width / wordmark.height), target_h),
                                Image.LANCZOS)
