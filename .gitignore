@@ -1,2 +1,6 @@
 .DS_Store
 .vscode/
+
+# Cached wordmark fetched by tools/gen_barbie_beach_wrap.py
+tools/.barbie_logo.*
+__pycache__/
