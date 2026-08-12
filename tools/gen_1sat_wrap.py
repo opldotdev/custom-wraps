@@ -1,113 +1,133 @@
 #!/usr/bin/env python3
-"""Generate the 1Sat Ordinals wrap for the Model Y (2025+) templates.
+"""Generate the 1Sat Ordinals wrap for the Model Y (2025+) Premium template.
 
-The concept: the car drives nose-first through the 1Sat Ordinals roundel, so
-the bullseye's rings transfer onto it along the length of the body -- the
-yellow core lands on the front clip, the white ring wraps the doors, and the
+The concept: the 1Sat Ordinals roundel is stretched over the car from the nose
+outward, so the bullseye's rings wrap the body as real concentric rings -- the
+yellow core covers the front clip, the white ring bands the middle, and the
 black outer ring covers the tail.
 
-The wrap templates are UV unwraps with the nose at the top of the image and the
-tail at the bottom, so longitudinal position along the car is very nearly
-linear in image y. That makes each ring a horizontal band. The band edges are
-pinned to the shutlines measured off each template so a ring never ends
-part-way across a panel, and the feather between bands is kept tight so they
-read as crisp as the rings in the logo rather than as an airbrushed fade.
+Two properties of the wrap template make this work:
+
+* It is a UV unwrap with the nose at the top of the image and the tail at the
+  bottom, so the rings can be laid out directly in image space.
+* It is very close to isotropic -- roughly 0.0050 m/px along the car against
+  0.0054 m/px around it, measured off the front door panel. A circle drawn in
+  the image is therefore a good stand-in for a circle laid over the body, which
+  is what a stretched decal looks like.
+
+ASPECT controls how strongly the rings bow. Taking it straight from those two
+measurements (~1.08) over-curves them, because the unwrap is centered on the
+roof line while the roundel is centered on the nose: a door pixel's horizontal
+distance in the image is its arc length down from the roof, which is much
+further than it actually sits from the nose badge. Pulling ASPECT back to 0.70
+compensates and leaves the rings bowing the way a stretched decal would.
+
+Because the rings are drawn as circles about the nose rather than as straight
+cuts across the image, every ring edge curves: it sits furthest back along the
+centerline (hood, roof, tailgate) and sweeps forward as it runs down the
+flanks, the way a stretched decal would.
+
+Radii come straight from the logo, so the proportions are the logo's own:
+yellow out to 0.602 of the radius, white to 0.734, black to the edge. Along the
+length of the car that reads as ~60% yellow, ~13% white, ~27% black.
+
+Edges are hard, as they are in the logo. They are rendered by supersampling and
+downsampling, which anti-aliases the boundary without softening it into a fade.
 
 Usage:  python3 tools/gen_1sat_wrap.py [--preview]
 """
 import os
 import sys
 
+import numpy as np
 from PIL import Image, ImageFilter
+
+TRIM = "modely-2025-premium"
+OUT_NAME = "1Sat_Ordinals.png"
 
 # Brand colors, sampled from https://1satordinals.com/images/logo-light.png
 YELLOW = (240, 187, 0)
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
-OUT_NAME = "1Sat_Ordinals.png"
+# Ring radii as fractions of the logo's outer radius, measured from the same
+# file: the yellow core ends at 0.602, the white ring at 0.734.
+R_YELLOW = 0.602
+R_WHITE = 0.734
 
-# (yellow -> white edge, white -> black edge) as fractions of vehicle length,
-# 0 = nose, 1 = tail. Measured per template: the first edge sits in the front
-# fender / front door gap, the second in the front door / rear door gap.
-TRIMS = {
-    "modely-2025-base": (0.334, 0.545),
-    "modely-2025-premium": (0.345, 0.566),
-    "modely-2025-performance": (0.345, 0.566),
-}
-FEATHER = 0.012
+# Center of the roundel, in template pixels: the middle of the front fascia
+# panel, which is the point of the car that goes through the logo first.
+NOSE = (511.0, 62.0)
 
+# How strongly the rings bow. See the note at the top of the file.
+ASPECT = 0.70
 
-def lerp(a, b, t):
-    return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
-
-
-def smoothstep(e0, e1, x):
-    t = min(1.0, max(0.0, (x - e0) / (e1 - e0)))
-    return t * t * (3 - 2 * t)
+# Supersampling factor used to anti-alias the hard ring edges.
+SS = 4
 
 
-def bands(front, rear):
-    h = FEATHER / 2
-    return [(0.0, YELLOW), (front - h, YELLOW), (front + h, WHITE),
-            (rear - h, WHITE), (rear + h, BLACK), (1.0, BLACK)]
-
-
-def sample(stops, t):
-    if t <= stops[0][0]:
-        return stops[0][1]
-    for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
-        if t <= t1:
-            return lerp(c0, c1, smoothstep(t0, t1, t))
-    return stops[-1][1]
-
-
-def build(template_path, out_path, edges, preview_path=None):
+def build(template_path, out_path, preview_path=None):
     tpl = Image.open(template_path).convert("RGBA")
     W, H = tpl.size
-    stops = bands(*edges)
 
-    art = Image.new("RGB", (W, H))
-    pixels = art.load()
-    for y in range(H):
-        color = sample(stops, y / (H - 1))
-        for x in range(W):
-            pixels[x, y] = color
-
-    # A template's alpha channel is exactly its paintable area: panel interiors
-    # are opaque, everything outside them is transparent. Grow it by a pixel so
-    # no unpainted seam shows along the panel outlines.
+    # The template's alpha channel is exactly its paintable area: panel
+    # interiors are opaque, everything outside them is transparent. Grow it by
+    # a pixel so no unpainted seam shows along the panel outlines.
     mask = tpl.getchannel("A").point(lambda v: 255 if v > 128 else 0)
     mask = mask.filter(ImageFilter.MaxFilter(3))
+
+    # Scale the roundel so its outer edge reaches the furthest painted pixel.
+    # That pins the ring proportions to the car's full extent.
+    ys, xs = np.nonzero(np.array(mask) > 128)
+    outer = np.sqrt(((xs - NOSE[0]) * ASPECT) ** 2 + (ys - NOSE[1]) ** 2).max()
+
+    # Distance field at supersampled resolution, so the ring edges land on a
+    # sub-pixel grid and average down to a clean hard edge.
+    yy, xx = np.mgrid[0:H * SS, 0:W * SS]
+    dx = ((xx + 0.5) / SS - NOSE[0]) * ASPECT
+    dy = (yy + 0.5) / SS - NOSE[1]
+    dist = np.sqrt(dx * dx + dy * dy)
+
+    art = np.empty((H * SS, W * SS, 3), dtype=np.uint8)
+    art[...] = BLACK
+    art[dist <= outer * R_WHITE] = WHITE
+    art[dist <= outer * R_YELLOW] = YELLOW
+
+    art = Image.fromarray(art).resize((W, H), Image.LANCZOS)
 
     out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     out.paste(art, (0, 0), mask)
     out.save(out_path, optimize=True)
 
     if preview_path:
-        # The wrap with the template outlines laid over it, to check that each
-        # band edge still lands on a shutline after a tweak.
+        # The wrap with the template outlines laid over it, to check where each
+        # ring crosses the panels after a tweak.
         pv = Image.new("RGBA", (W, H), (255, 255, 255, 255))
         pv.alpha_composite(out)
-        lines = tpl.copy()
-        lp = lines.load()
-        for y in range(H):
-            for x in range(W):
-                r, g, b, a = lp[x, y]
-                dark = a > 128 and (r + g + b) / 3 < 128
-                lp[x, y] = (255, 0, 255, 255) if dark else (0, 0, 0, 0)
-        pv.alpha_composite(lines)
+        t = np.array(tpl)
+        dark = (t[..., 3] > 128) & (t[..., :3].mean(axis=2) < 128)
+        lines = np.zeros((H, W, 4), dtype=np.uint8)
+        lines[dark] = (255, 0, 255, 255)
+        pv.alpha_composite(Image.fromarray(lines))
         pv.convert("RGB").save(preview_path)
+
+    return np.array(mask) > 128
 
 
 def main():
-    preview = "--preview" in sys.argv
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for trim, edges in TRIMS.items():
-        out = os.path.join(root, trim, "example", OUT_NAME)
-        build(os.path.join(root, trim, "template.png"), out, edges,
-              os.path.join(root, trim, "example", "preview.png") if preview else None)
-        print(f"{trim}: {os.path.getsize(out):,} bytes")
+    out = os.path.join(root, TRIM, "example", OUT_NAME)
+    # The preview is a working aid, so it lands in the working directory rather
+    # than alongside the wraps.
+    preview = "1sat_preview.png" if "--preview" in sys.argv else None
+    painted = build(os.path.join(root, TRIM, "template.png"), out, preview)
+
+    art = np.array(Image.open(out).convert("RGB"))[painted]
+    total = len(art)
+    for name, color in (("yellow", YELLOW), ("white", WHITE), ("black", BLACK)):
+        n = (np.abs(art.astype(int) - color).sum(axis=1) < 30).sum()
+        print(f"  {name:6s} {n / total:6.1%} of painted area")
+    print(f"{TRIM}: {os.path.getsize(out):,} bytes")
 
 
 if __name__ == "__main__":
