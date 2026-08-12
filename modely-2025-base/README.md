@@ -11,6 +11,7 @@ Download the template below and customize it with your own design. For complete 
 ## Examples
 
 <p>
+<a href="example/1Sat_Ordinals.png"><img src="example/1Sat_Ordinals.png" width="150"/></a>
 <a href="example/Acid_Drip.png"><img src="example/Acid_Drip.png" width="150"/></a>
 <a href="example/Ani.png"><img src="example/Ani.png" width="150"/></a>
 <a href="example/Apocalypse.png"><img src="example/Apocalypse.png" width="150"/></a>
