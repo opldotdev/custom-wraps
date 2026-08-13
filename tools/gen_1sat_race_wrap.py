@@ -129,8 +129,15 @@ def anchor(panel):
 
 
 def disc(art, panel, want_r, ss=4):
-    """1Sat roundel: yellow core inside a white ring, at the logo's own ratios.
-    The logo's outer black ring is left to the black bodywork underneath.
+    """1Sat roundel, dark-background variant: a white outer ring, then a black
+    ring, then the yellow core, at the logo's own radius ratios.
+
+    The mark ships in two versions. The light-background one puts black on the
+    outside; the dark-background one swaps that for white, so the ring reads
+    against the body instead of disappearing into it. This car is black, so it
+    takes the dark version -- an outer black ring here would vanish into the
+    bodywork and leave the white ring looking like the edge of the mark.
+
     Sits at the point of the panel furthest from any edge, sized so the whole
     roundel clears the panel rather than being cut by the mask."""
     clear = ndimage.distance_transform_edt(panel)
@@ -141,7 +148,8 @@ def disc(art, panel, want_r, ss=4):
     d = np.sqrt(xx ** 2 + yy ** 2) / ss
     rgba = np.zeros((2 * r * ss, 2 * r * ss, 4), np.uint8)
     rgba[d <= radius] = (*WHITE, 255)
-    rgba[d <= radius * (0.602 / 0.734)] = (*YELLOW, 255)
+    rgba[d <= radius * 0.734] = (*BLACK, 255)
+    rgba[d <= radius * 0.602] = (*YELLOW, 255)
     small = np.array(Image.fromarray(rgba).resize((2 * r, 2 * r), Image.LANCZOS))
     over(art, small, cx - r, cy - r)
     return radius
