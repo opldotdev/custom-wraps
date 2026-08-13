@@ -3,8 +3,13 @@
 
 The concept: the 1Sat Ordinals roundel is stretched over the car from the nose
 outward, so the bullseye's rings wrap the body as real concentric rings -- the
-yellow core covers the front clip, the white ring bands the middle, and the
-black outer ring covers the tail.
+yellow core covers the front clip, the black ring bands the middle, and the
+white outer ring covers the tail.
+
+The mark ships in two versions, one for light backgrounds with black on the
+outside and one for dark backgrounds with white on the outside. This wrap uses
+the dark-background version, so the ring order out from the nose is yellow,
+black, white.
 
 Two properties of the wrap template make this work:
 
@@ -27,9 +32,10 @@ cuts across the image, every ring edge curves: it sits furthest back along the
 centerline (hood, roof, tailgate) and sweeps forward as it runs down the
 flanks, the way a stretched decal would.
 
-Radii come straight from the logo, so the proportions are the logo's own:
-yellow out to 0.602 of the radius, white to 0.734, black to the edge. Along the
-length of the car that reads as ~60% yellow, ~13% white, ~27% black.
+Radii come straight from the logo, so the proportions are the logo's own: the
+core out to 0.602 of the radius, the middle ring to 0.734, the outer ring to
+the edge. Along the length of the car that reads as ~60% yellow, ~13% black,
+~27% white.
 
 Edges are hard, as they are in the logo. They are rendered by supersampling and
 downsampling, which anti-aliases the boundary without softening it into a fade.
@@ -50,10 +56,11 @@ YELLOW = (240, 187, 0)
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
-# Ring radii as fractions of the logo's outer radius, measured from the same
-# file: the yellow core ends at 0.602, the white ring at 0.734.
-R_YELLOW = 0.602
-R_WHITE = 0.734
+# The three bands, nose outward, as the dark-background mark orders them, with
+# radii as fractions of the logo's outer radius measured off the logo file.
+CORE, R_CORE = YELLOW, 0.602
+MIDDLE, R_MIDDLE = BLACK, 0.734
+OUTER = WHITE
 
 # Center of the roundel, in template pixels: the middle of the front fascia
 # panel, which is the point of the car that goes through the logo first.
@@ -89,9 +96,9 @@ def build(template_path, out_path, preview_path=None):
     dist = np.sqrt(dx * dx + dy * dy)
 
     art = np.empty((H * SS, W * SS, 3), dtype=np.uint8)
-    art[...] = BLACK
-    art[dist <= outer * R_WHITE] = WHITE
-    art[dist <= outer * R_YELLOW] = YELLOW
+    art[...] = OUTER
+    art[dist <= outer * R_MIDDLE] = MIDDLE
+    art[dist <= outer * R_CORE] = CORE
 
     art = Image.fromarray(art).resize((W, H), Image.LANCZOS)
 
@@ -124,7 +131,7 @@ def main():
 
     art = np.array(Image.open(out).convert("RGB"))[painted]
     total = len(art)
-    for name, color in (("yellow", YELLOW), ("white", WHITE), ("black", BLACK)):
+    for name, color in (("core", CORE), ("middle", MIDDLE), ("outer", OUTER)):
         n = (np.abs(art.astype(int) - color).sum(axis=1) < 30).sum()
         print(f"  {name:6s} {n / total:6.1%} of painted area")
     print(f"{TRIM}: {os.path.getsize(out):,} bytes")
