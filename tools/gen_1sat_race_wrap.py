@@ -55,7 +55,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SPONSORS = {
     "gorillapool": "https://gorillapool.io/logo.svg",
     "nchain": "https://nchain.com/wp-content/uploads/2025/04/nchain-logo.svg",
-    "bsv": "https://bsvblockchain.org/wp-content/uploads/2025/10/logo-bsvb.svg",
+    "bsva": "https://bsvassociation.org/wp-content/uploads/2025/03/BSV-A-logo-blue.svg",
     "babbage": "https://projectbabbage.com/babb-logo-dark.svg",
 }
 
@@ -124,9 +124,12 @@ def sponsor(name, width):
     """Fetch a sponsor mark and render it white at the given pixel width.
 
     Race liveries print sponsor marks in a single color, and white is the only
-    one that reads on a black car -- BSV's navy in particular disappears into
-    it. Recoloring by alpha rather than by pixel keeps every counter and gap in
-    the marks intact instead of flattening them into blobs."""
+    one that reads on a black car -- the BSV Association blue in particular
+    disappears into it. Recoloring by alpha rather than by pixel keeps every
+    counter and gap in the marks intact instead of flattening them into blobs.
+
+    The cache is keyed by name, so a mark that changes source needs a new key
+    or a deleted cache file, otherwise the old artwork is silently reused."""
     cache = os.path.join(HERE, f".sponsor_{name}.svg")
     if not os.path.exists(cache):
         print(f"  fetching {name} from {SPONSORS[name]}")
@@ -276,7 +279,7 @@ def build(template_path, out_path):
     for name, width, box_l, box_r, along, up in (
             ("nchain", 84, FENDER_L, FENDER_R, 0.72, 0.74),
             ("gorillapool", 76, REAR_DOOR_L, REAR_DOOR_R, 0.26, 0.76),
-            ("bsv", 118, REAR_DOOR_L, REAR_DOOR_R, 0.48, 0.16),
+            ("bsva", 118, REAR_DOOR_L, REAR_DOOR_R, 0.48, 0.16),
             ("babbage", 40, REAR_BUMPER_L, REAR_BUMPER_R, 0.42, 0.62)):
         mark = np.flip(sponsor(name, width).transpose(1, 0, 2), axis=1)
         place(mark, box_l, f"{name} L", "left", along, up)
