@@ -69,6 +69,7 @@ FONTS = [
 HOOD = (375, 110, 644, 338)
 DOOR_L, DOOR_R = (82, 348, 258, 594), (762, 350, 937, 595)
 REAR_DOOR_L, REAR_DOOR_R = (69, 570, 234, 791), (784, 573, 949, 795)
+REAR_BUMPER_L, REAR_BUMPER_R = (55, 885, 173, 1013), (853, 888, 968, 1016)
 FENDER_L, FENDER_R = (111, 114, 331, 366), (694, 114, 911, 367)
 QUARTER_L, QUARTER_R = (124, 779, 264, 949), (757, 782, 898, 952)
 
@@ -147,19 +148,6 @@ def sponsor(name, width):
     return np.array(white)
 
 
-def stack(blocks, gap):
-    """Centre a set of marks into one sponsor board, top to bottom."""
-    w = max(b.shape[1] for b in blocks)
-    h = sum(b.shape[0] for b in blocks) + gap * (len(blocks) - 1)
-    out = np.zeros((h, w, 4), np.uint8)
-    y = 0
-    for b in blocks:
-        x = (w - b.shape[1]) // 2
-        out[y:y + b.shape[0], x:x + b.shape[1]] = b
-        y += b.shape[0] + gap
-    return out
-
-
 def panel_labels(tpl):
     """Label each panel interior. Interiors are the opaque light areas of the
     template; the dark outlines separate one panel from the next."""
@@ -226,28 +214,42 @@ def build(template_path, out_path):
     art[:, (off >= STRIPE_IN) & (off <= STRIPE_OUT)] = YELLOW
     art[:, (off >= PIN_IN) & (off <= PIN_OUT)] = WHITE
 
-    def place(block, box, label):
-        """Sit a block on its panel, starting from the panel's centre of mass
-        and nudging until none of it spills onto neighbouring bodywork. Panels
-        are irregular, so the centre of mass is a starting guess, not an answer."""
+    def place(block, box, label, side=None, along=None, up=None):
+        """Sit a block on its panel and nudge until none of it spills onto
+        neighbouring bodywork. Panels are irregular, so the starting point is a
+        guess, not an answer.
+
+        Without a spot it centres on the panel's centre of mass. With one, along
+        runs 0 at the panel's front edge to 1 at its rear, and up runs 0 at the
+        rocker to 1 at the top of the car -- which is +x on the left flank and
+        -x on the right, since the two columns peel in opposite directions."""
         panel = panel_at(labels, box)
-        cx, cy = anchor(panel)
+        if side is None:
+            cx, cy = anchor(panel)
+        else:
+            x0, y0, x1, y1 = box
+            fx = up if side == "left" else 1.0 - up
+            cx, cy = x0 + fx * (x1 - x0), y0 + along * (y1 - y0)
         bh, bw = block.shape[:2]
         ink = block[..., 3] > 8
         best = None
-        for dy in range(-28, 29, 2):
-            for dx in range(-28, 29, 2):
+        span = 28 if side is None else 24
+        for dy in range(-span, span + 1, 2):
+            for dx in range(-span, span + 1, 2):
                 x, y = int(round(cx - bw / 2)) + dx, int(round(cy - bh / 2)) + dy
                 if x < 0 or y < 0 or x + bw > W or y + bh > H:
                     continue
-                spill = int((ink & painted[y:y + bh, x:x + bw]
-                             & ~panel[y:y + bh, x:x + bw]).sum())
-                score = (spill, dx * dx + dy * dy)
+                # Score on everything that misses the panel, not just what lands
+                # on a neighbour. Pixels that fall into the gaps between panels
+                # are painted nowhere and get clipped away by the mask, which
+                # silently trims a mark rather than moving it.
+                outside = int((ink & ~panel[y:y + bh, x:x + bw]).sum())
+                score = (outside, dx * dx + dy * dy)
                 if best is None or score < best[0]:
                     best = (score, x, y)
-        (spill, _), x, y = best
+        (outside, _), x, y = best
         over(art, block, x, y)
-        print(f"  {label:12s} {bw}x{bh}px, {spill} px onto other panels")
+        print(f"  {label:12s} {bw}x{bh}px, {outside} px off its panel")
 
     # Hood wordmark: white so it stays legible where it crosses the stripes,
     # with a black stroke to hold it off the yellow.
@@ -265,22 +267,20 @@ def build(template_path, out_path):
     place(left, DOOR_L, "door left")
     place(left[::-1, ::-1], DOOR_R, "door right")
 
-    # Sponsor board on the rear doors, and the Babbage mark on the front
-    # fenders. Both are built for the left flank and turned 180 degrees for the
-    # right, the same world mirror the wordmarks use, so each mark sits upright
-    # and unmirrored when viewed from its own side of the car.
-    # The board's stacked height maps to the car's vertical extent, which is
-    # the tighter of the two on a door, so it sets the sizing.
-    board = stack([sponsor("gorillapool", 124), sponsor("nchain", 110),
-                   sponsor("bsv", 124)], gap=9)
-    board_l = np.flip(board.transpose(1, 0, 2), axis=1)
-    place(board_l, REAR_DOOR_L, "sponsors L")
-    place(board_l[::-1, ::-1], REAR_DOOR_R, "sponsors R")
-
-    bab = sponsor("babbage", 74)
-    bab_l = np.flip(bab.transpose(1, 0, 2), axis=1)
-    place(bab_l, FENDER_L, "babbage L")
-    place(bab_l[::-1, ::-1], FENDER_R, "babbage R")
+    # Sponsor marks, scattered rather than stacked. On a real car these are
+    # small decals spread over the body -- roughly 20-45cm at this template's
+    # ~5mm per pixel -- not one block on a door, which reads as a decal sheet.
+    # Each is built for the left flank and turned 180 degrees for the right,
+    # the same world mirror the wordmarks use, so every mark sits upright and
+    # unmirrored viewed from its own side.
+    for name, width, box_l, box_r, along, up in (
+            ("nchain", 84, FENDER_L, FENDER_R, 0.72, 0.74),
+            ("gorillapool", 76, REAR_DOOR_L, REAR_DOOR_R, 0.26, 0.76),
+            ("bsv", 118, REAR_DOOR_L, REAR_DOOR_R, 0.48, 0.16),
+            ("babbage", 40, REAR_BUMPER_L, REAR_BUMPER_R, 0.42, 0.62)):
+        mark = np.flip(sponsor(name, width).transpose(1, 0, 2), axis=1)
+        place(mark, box_l, f"{name} L", "left", along, up)
+        place(mark[::-1, ::-1], box_r, f"{name} R", "right", along, up)
 
     # Roundels on the rear quarters, as competition number discs.
     for box, side in ((QUARTER_L, "left"), (QUARTER_R, "right")):
@@ -310,6 +310,7 @@ def verify(out_path):
         flank(DOOR_L, "left"), flank(DOOR_R, "right"),
         flank(REAR_DOOR_L, "left"), flank(REAR_DOOR_R, "right"),
         flank(FENDER_L, "left"), flank(FENDER_R, "right"),
+        flank(REAR_BUMPER_L, "left"), flank(REAR_BUMPER_R, "right"),
         w[y0:y1, x0:x1][::-1, ::-1] if HOOD_READS_FROM == "front" else w[y0:y1, x0:x1],
     ]
     pad = 12
