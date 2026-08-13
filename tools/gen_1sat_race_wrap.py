@@ -32,6 +32,7 @@ Usage:  python3 tools/gen_1sat_race_wrap.py [--verify]
 """
 import os
 import sys
+import urllib.request
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -47,6 +48,17 @@ BLACK = (0, 0, 0)
 
 HOOD_READS_FROM = "front"
 
+# Sponsor marks from the BSV ecosystem, fetched from each project's own site and
+# cached outside version control rather than vendored here. They are third-party
+# trademarks: fine on your own car, not on anything you sell.
+HERE = os.path.dirname(os.path.abspath(__file__))
+SPONSORS = {
+    "gorillapool": "https://gorillapool.io/logo.svg",
+    "nchain": "https://nchain.com/wp-content/uploads/2025/04/nchain-logo.svg",
+    "bsv": "https://bsvblockchain.org/wp-content/uploads/2025/10/logo-bsvb.svg",
+    "babbage": "https://projectbabbage.com/babb-logo-dark.svg",
+}
+
 FONTS = [
     "/mnt/skills/examples/canvas-design/canvas-fonts/BigShoulders-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -56,6 +68,8 @@ FONTS = [
 # Panel boxes measured off modely-2025-premium/template.png, as (x0, y0, x1, y1).
 HOOD = (375, 110, 644, 338)
 DOOR_L, DOOR_R = (82, 348, 258, 594), (762, 350, 937, 595)
+REAR_DOOR_L, REAR_DOOR_R = (69, 570, 234, 791), (784, 573, 949, 795)
+FENDER_L, FENDER_R = (111, 114, 331, 366), (694, 114, 911, 367)
 QUARTER_L, QUARTER_R = (124, 779, 264, 949), (757, 782, 898, 952)
 
 CENTER_X = 511.5
@@ -103,6 +117,47 @@ def over(dst, src, x, y):
     region = dst[y:y + h, x:x + w]
     a = src[..., 3:4] / 255.0
     region[...] = (src[..., :3] * a + region * (1 - a)).astype(np.uint8)
+
+
+def sponsor(name, width):
+    """Fetch a sponsor mark and render it white at the given pixel width.
+
+    Race liveries print sponsor marks in a single color, and white is the only
+    one that reads on a black car -- BSV's navy in particular disappears into
+    it. Recoloring by alpha rather than by pixel keeps every counter and gap in
+    the marks intact instead of flattening them into blobs."""
+    cache = os.path.join(HERE, f".sponsor_{name}.svg")
+    if not os.path.exists(cache):
+        print(f"  fetching {name} from {SPONSORS[name]}")
+        try:
+            req = urllib.request.Request(
+                SPONSORS[name], headers={"User-Agent": "custom-wraps-generator/1.0"})
+            with urllib.request.urlopen(req, timeout=40) as r, open(cache, "wb") as f:
+                f.write(r.read())
+        except Exception as exc:
+            raise SystemExit(f"could not fetch the {name} mark ({exc}).\n"
+                             f"Download {SPONSORS[name]} to {cache} and re-run.")
+    import cairosvg
+    png = cache.replace(".svg", ".png")
+    cairosvg.svg2png(url=cache, write_to=png, output_width=width * 4, background_color=None)
+    im = Image.open(png).convert("RGBA")
+    im = im.resize((width, max(1, round(width * im.height / im.width))), Image.LANCZOS)
+    white = Image.new("RGBA", im.size, WHITE + (0,))
+    white.putalpha(im.getchannel("A"))
+    return np.array(white)
+
+
+def stack(blocks, gap):
+    """Centre a set of marks into one sponsor board, top to bottom."""
+    w = max(b.shape[1] for b in blocks)
+    h = sum(b.shape[0] for b in blocks) + gap * (len(blocks) - 1)
+    out = np.zeros((h, w, 4), np.uint8)
+    y = 0
+    for b in blocks:
+        x = (w - b.shape[1]) // 2
+        out[y:y + b.shape[0], x:x + b.shape[1]] = b
+        y += b.shape[0] + gap
+    return out
 
 
 def panel_labels(tpl):
@@ -180,8 +235,8 @@ def build(template_path, out_path):
         bh, bw = block.shape[:2]
         ink = block[..., 3] > 8
         best = None
-        for dy in range(-16, 17, 2):
-            for dx in range(-16, 17, 2):
+        for dy in range(-28, 29, 2):
+            for dx in range(-28, 29, 2):
                 x, y = int(round(cx - bw / 2)) + dx, int(round(cy - bh / 2)) + dy
                 if x < 0 or y < 0 or x + bw > W or y + bh > H:
                     continue
@@ -210,6 +265,23 @@ def build(template_path, out_path):
     place(left, DOOR_L, "door left")
     place(left[::-1, ::-1], DOOR_R, "door right")
 
+    # Sponsor board on the rear doors, and the Babbage mark on the front
+    # fenders. Both are built for the left flank and turned 180 degrees for the
+    # right, the same world mirror the wordmarks use, so each mark sits upright
+    # and unmirrored when viewed from its own side of the car.
+    # The board's stacked height maps to the car's vertical extent, which is
+    # the tighter of the two on a door, so it sets the sizing.
+    board = stack([sponsor("gorillapool", 124), sponsor("nchain", 110),
+                   sponsor("bsv", 124)], gap=9)
+    board_l = np.flip(board.transpose(1, 0, 2), axis=1)
+    place(board_l, REAR_DOOR_L, "sponsors L")
+    place(board_l[::-1, ::-1], REAR_DOOR_R, "sponsors R")
+
+    bab = sponsor("babbage", 74)
+    bab_l = np.flip(bab.transpose(1, 0, 2), axis=1)
+    place(bab_l, FENDER_L, "babbage L")
+    place(bab_l[::-1, ::-1], FENDER_R, "babbage R")
+
     # Roundels on the rear quarters, as competition number discs.
     for box, side in ((QUARTER_L, "left"), (QUARTER_R, "right")):
         r = disc(art, panel_at(labels, box), 52)
@@ -222,26 +294,34 @@ def build(template_path, out_path):
 
 
 def verify(out_path):
-    """Write flank and hood views as they are actually seen, to check that every
-    wordmark reads the right way round."""
+    """Write every lettered panel as it is actually seen, so each wordmark and
+    sponsor mark can be checked upright and the right way round. Anything that
+    carries a mark belongs here -- the sponsor panels were added blind the first
+    time because this only covered the front doors and the hood."""
     w = np.array(Image.open(out_path).convert("RGB"))
-    x0, y0, x1, y1 = DOOR_L
-    lf = np.flip(w[y0:y1, x0:x1].transpose(1, 0, 2), axis=0)
-    x0, y0, x1, y1 = DOOR_R
-    rf = np.flip(w[y0:y1, x0:x1].transpose(1, 0, 2), axis=1)
-    x0, y0, x1, y1 = HOOD
-    hd = w[y0:y1, x0:x1][::-1, ::-1] if HOOD_READS_FROM == "front" else w[y0:y1, x0:x1]
 
+    def flank(box, side):
+        x0, y0, x1, y1 = box
+        block = w[y0:y1, x0:x1].transpose(1, 0, 2)
+        return np.flip(block, axis=0 if side == "left" else 1)
+
+    x0, y0, x1, y1 = HOOD
+    blocks = [
+        flank(DOOR_L, "left"), flank(DOOR_R, "right"),
+        flank(REAR_DOOR_L, "left"), flank(REAR_DOOR_R, "right"),
+        flank(FENDER_L, "left"), flank(FENDER_R, "right"),
+        w[y0:y1, x0:x1][::-1, ::-1] if HOOD_READS_FROM == "front" else w[y0:y1, x0:x1],
+    ]
     pad = 12
-    width = max(lf.shape[1], rf.shape[1], hd.shape[1]) + 2 * pad
-    height = lf.shape[0] + rf.shape[0] + hd.shape[0] + 4 * pad
+    width = max(b.shape[1] for b in blocks) + 2 * pad
+    height = sum(b.shape[0] for b in blocks) + pad * (len(blocks) + 1)
     sheet = np.full((height, width, 3), 90, np.uint8)
     y = pad
-    for block in (lf, rf, hd):
+    for block in blocks:
         sheet[y:y + block.shape[0], pad:pad + block.shape[1]] = block
         y += block.shape[0] + pad
     Image.fromarray(sheet).save("1sat_race_verify.png")
-    print("wrote 1sat_race_verify.png (left flank, right flank, hood-from-front)")
+    print("wrote 1sat_race_verify.png (front doors, rear doors, fenders, hood)")
 
 
 def main():
